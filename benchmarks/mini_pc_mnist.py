@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,10 @@ QUICK_OVERRIDES: dict[str, Any] = {
     "seeds": [0], "max_epochs": 2, "patience": 1, "num_keys": 2000, "test_size": 2000,
 }
 BASELINE = "pc_feedforward[train_lam=0]"
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 class MiniPC(nn.Module):
@@ -260,6 +265,7 @@ def fit(
             )
         val_acc = accuracy(model.predict(split["val_x"]), split["val_y"])
         history.append(val_acc)
+        _log(f"  epoch {len(history)}: val acc {val_acc:.4f}")
         if val_acc > best + cfg["min_delta"]:
             best, stale = val_acc, 0
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -358,6 +364,7 @@ def run_mini_pc(
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     validate_config(cfg)
     if data is None:
+        _log("loading MNIST (slow: converts 70k images one by one)")
         train_x, train_y = load_mnist(cfg["data_dir"], train=True)
         test_x, test_y = load_mnist(cfg["data_dir"], train=False)
         data = {"train_x": train_x, "train_y": train_y, "test_x": test_x, "test_y": test_y}
@@ -373,6 +380,7 @@ def run_mini_pc(
             model = MiniPC(in_dim, cfg["hidden"], num_classes)
             history = fit(model, split, cfg, lam=float(lam))
             models[float(lam)] = model
+            _log(f"seed {seed} train_lam {lam:g}: trained {len(history)} epochs")
             training.append({"seed": seed, "train_lam": lam, "epochs": len(history), "best_val_acc": max(history)})
 
         base = models[0.0]
@@ -383,6 +391,7 @@ def run_mini_pc(
         keys_h, keys_y = features(base, split["train_x"][key_idx]), split["train_y"][key_idx]
 
         for noise in cfg["noise_levels"]:
+            _log(f"seed {seed} evaluating noise {noise:g}")
             torch.manual_seed(1000 * seed + int(round(100 * noise)))
             rows.extend(
                 evaluate_noise_level(

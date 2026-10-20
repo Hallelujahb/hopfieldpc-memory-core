@@ -22,6 +22,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 QUICK_OVERRIDES: dict[str, Any] = {"seeds": [0], "num_keys": 2000, "num_test": 2000}
 BASELINE = "knn5"
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 def predict_methods(
@@ -100,6 +105,7 @@ def run_readout_controls(
 ) -> dict[str, Any]:
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     if data is None:
+        _log("loading MNIST (slow: converts 70k images one by one)")
         train_x, train_y = load_mnist(cfg["data_dir"], train=True)
         test_x, test_y = load_mnist(cfg["data_dir"], train=False)
     else:
@@ -119,6 +125,7 @@ def run_readout_controls(
         key_idx = torch.randperm(len(train_x), generator=gen)[: cfg["num_keys"]]
         key_x, key_y = train_x[key_idx], train_y[key_idx]
         for noise in cfg["noise_levels"]:
+            _log(f"seed {seed} evaluating noise {noise:g}")
             torch.manual_seed(1000 * seed + int(round(100 * noise)))
             x = test_x if noise == 0 else add_gaussian_noise(test_x, noise)
             preds = predict_methods(
