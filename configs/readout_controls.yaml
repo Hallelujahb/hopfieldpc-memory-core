@@ -1,0 +1,10 @@
+seeds: [0, 1, 2, 3, 4]
+num_classes: 10
+num_keys: 10000
+num_test: null
+noise_levels: [0.0, 0.3, 0.5, 1.0]
+beta_values: [10.0, 30.0, 100.0]
+knn_values: [1, 5]
+chunk: 1000
+data_dir: "./data"
+reports_dir: "reports/readout_controls"

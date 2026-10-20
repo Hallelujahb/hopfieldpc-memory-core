@@ -30,6 +30,7 @@ from .diagnostics import (
 from .energy import hopfield_energy, hopfield_full_energy
 from .functional import hopfield_retrieve, multi_step_retrieve
 from .memory import HopfieldMemory
+from .readout import class_prototypes, hopfield_readout, one_hot_values
 
 __all__ = [
     "HopfieldMemory",
@@ -39,11 +40,13 @@ __all__ = [
     "argmax_memory_index",
     "attention_entropy",
     "build_retrieval_diagnostics",
+    "class_prototypes",
     "estimate_top_curvature",
     "hopfield_curvature_bounds",
     "hopfield_energy",
     "hopfield_energy_grad",
     "hopfield_full_energy",
+    "hopfield_readout",
     "hopfield_retrieve",
     "hopfield_retrieve_scored",
     "hopfield_score_energy",
@@ -51,6 +54,7 @@ __all__ = [
     "joint_energy",
     "max_attention_weight",
     "multi_step_retrieve",
+    "one_hot_values",
     "pull_step",
     "retrieval_distance",
     "safe_step_size",
