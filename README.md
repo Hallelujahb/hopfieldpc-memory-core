@@ -40,77 +40,30 @@ python -c "import torch; print(torch.__version__)"
 python -c "import hopfieldpc; print('hopfieldpc import OK')"
 ```
 
-## Current Implementation Stage
+## What is in this repository
 
-Current task:
+| Area | Files | Purpose |
+|---|---|---|
+| Core retrieval | `src/hopfieldpc/functional.py`, `memory.py`, `api.py` | One-step and multi-step modern Hopfield retrieval, `HopfieldMemory` module, shape contract |
+| Energy and diagnostics | `energy.py`, `diagnostics.py` | Hopfield energy; entropy, top-k mass, retrieval distance |
+| PC coupling | `coupling.py`, `docs/energy_consistent_coupling.md` | Joint energy `E_PC + lam * E_H`, pull term `z - retrieved(z)`, step-size rule, curvature estimator |
+| Readout | `readout.py` | Heteroassociative readout (keys matched, values returned), class prototypes |
+| Mini PC network | `minipc.py`, `docs/mini_pc_experiment.md` | Standalone PC classifier used to test the coupling and readout before FabricPC |
+| Benchmarks | `benchmarks/` | Synthetic retrieval, beta sweep, MNIST prototype retrieval, MNIST controls, mini-PC comparison, coupling toy study |
 
-```text
-Task 2: Implement one-step Hopfield retrieval
-```
-
-Implemented so far:
-
-```text
-src/hopfieldpc/api.py
-src/hopfieldpc/functional.py
-src/hopfieldpc/memory.py
-src/hopfieldpc/__init__.py
-tests/test_api_contract.py
-tests/test_one_step_retrieval.py
-tests/test_beta_behavior.py
-```
-
-The module now validates tensor shapes and performs one-step modern Hopfield retrieval.
-
-## Expected Tensor Contract
-
-```text
-query:     [batch_size, dim]
-memory:    [num_memories, dim]
-retrieved: [batch_size, dim]
-weights:   [batch_size, num_memories]
-```
-
-## Core Retrieval Formula
-
-```python
-scores = beta * query @ memory.T
-weights = softmax(scores)
-retrieved = weights @ memory
-```
-
-Equivalent mathematical form:
-
-```text
-p = softmax(β qMᵀ)
-h_memory = pM
-```
-
-## Run Tests
-
-Run all tests:
+## Run
 
 ```bash
 pytest -q
+python -m benchmarks.pc_hopfield_toy
+python -m benchmarks.mnist_readout_controls
+python -m benchmarks.mini_pc_mnist
+bash scripts/run_all.sh        # everything, outputs saved under reports/
 ```
 
-Run only the API contract tests:
+## Status
 
-```bash
-pytest tests/test_api_contract.py -q
-```
-
-Run only one-step retrieval tests:
-
-```bash
-pytest tests/test_one_step_retrieval.py tests/test_beta_behavior.py -q
-```
-
-## Next Planned Tasks
-
-```text
-Task 3: Add memory modes and prepare module extension points.
-Task 4: Add optional multi-step retrieval.
-Task 5: Add diagnostics such as entropy, top-k mass, and retrieval distance.
-Task 6: Add synthetic retrieval benchmarks.
-```
+Standalone memory core, diagnostics and benchmarks are implemented and tested.
+Energy-consistent coupling, the heteroassociative readout and a standalone PC comparison are
+implemented. FabricPC integration is not done yet: `hopfieldpc.settle` takes any differentiable
+PC energy as a function of the hidden state, which is the intended integration point.
