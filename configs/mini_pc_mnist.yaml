@@ -1,0 +1,29 @@
+seeds: [0, 1, 2, 3, 4]
+num_classes: 10
+hidden: 256
+batch_size: 256
+lr: 0.001
+max_epochs: 30
+patience: 3
+min_delta: 0.0005
+infer_steps: 15
+val_size: 5000
+split_seed: 0
+test_size: null
+
+train_lams: [0.0, 0.1]
+train_beta: 1.0
+train_score: l2
+
+noise_levels: [0.0, 0.3, 0.5, 1.0]
+clamp_noise: true
+
+pull_lams: [0.05, 0.1, 0.3, 1.0]
+pull_betas: [0.05, 0.5, 2.0, 8.0]
+pull_scores: [dot, l2]
+pull_steps: 30
+readout_betas: [10.0, 30.0, 100.0]
+num_keys: 10000
+
+data_dir: "./data"
+reports_dir: "reports/mini_pc_mnist"
