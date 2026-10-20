@@ -5,6 +5,16 @@ before FabricPC integration.
 """
 
 from .api import HopfieldMemoryOutput, HopfieldShapeContract, HopfieldShapeError
+from .coupling import (
+    estimate_top_curvature,
+    hopfield_curvature_bounds,
+    hopfield_energy_grad,
+    hopfield_smoothness,
+    joint_energy,
+    pull_step,
+    safe_step_size,
+    settle,
+)
 from .diagnostics import (
     argmax_memory_index,
     attention_entropy,
@@ -27,12 +37,20 @@ __all__ = [
     "argmax_memory_index",
     "attention_entropy",
     "build_retrieval_diagnostics",
+    "estimate_top_curvature",
+    "hopfield_curvature_bounds",
     "hopfield_energy",
+    "hopfield_energy_grad",
     "hopfield_retrieve",
+    "hopfield_smoothness",
+    "joint_energy",
     "max_attention_weight",
     "multi_step_retrieve",
+    "pull_step",
     "retrieval_distance",
+    "safe_step_size",
     "selected_memory_distance",
+    "settle",
     "topk_mass",
     "topk_recall",
 ]
