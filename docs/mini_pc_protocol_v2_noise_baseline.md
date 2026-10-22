@@ -48,3 +48,31 @@ the standard deviation of the paired differences over 5 seeds.
 Same grid as v1, whose upper edge (lam = 1) was often chosen. Extending the grid is a separate,
 labelled exploratory run. Training noise matches the test noise type, which favours the new
 baseline at 0.3 and 0.5 by design. Noise 1.0 tests extrapolation.
+
+## Results
+
+5 seeds, full 10,000-image test set, mean test accuracy. Paired differences and per-seed values are
+in results.csv.
+
+| method | noise 0 | noise 0.3 | noise 0.5 | noise 1.0 |
+|---|---|---|---|---|
+| clean_feedforward | 0.966 | 0.276 | 0.140 | 0.104 |
+| noisetrained_feedforward | 0.951 | 0.931 | 0.892 | 0.690 |
+| noisetrained_pull[prototypes,l2] | 0.951 | 0.931 | 0.892 | 0.691 |
+| noisetrained_pull[random,l2] | 0.950 | 0.931 | 0.889 | 0.685 |
+| noisetrained_hidden_nearest_mean_l2 | 0.866 | 0.801 | 0.651 | 0.390 |
+| noisetrained_hidden_knn5 | 0.950 | 0.908 | 0.765 | 0.397 |
+
+Against the criteria written above:
+
+1. The pull does not beat the noise-trained baseline at any noise level (paired differences 0.000,
+   0.000, 0.000, +0.001; the bar was +0.01). Criterion 1 fails.
+2. The v1 gain is therefore reported as largely due to a fragile baseline.
+3. Noise training itself gains about +0.65, +0.75 and +0.59 over the clean baseline at noise 0.3, 0.5
+   and 1.0 (noise 1.0 was never seen in training), at a cost of about 0.015 on clean data.
+
+Validation selected the weakest pull in most cases (lam = 0.05, beta = 0.05, also the first grid
+entry, which wins ties), so within this grid no pull setting beat doing almost nothing.
+
+Not claimed: that Hopfield memory cannot help predictive coding. This covers one hidden layer, one
+dataset, Gaussian noise, a frozen class-prototype memory and this grid.
