@@ -61,6 +61,22 @@ Banks on different layers (disjoint slices) give `max_b lam_b`. Banks on the sam
 Using the sum over all banks is also safe, but wastes step size when banks sit on different layers.
 The same scope caveat applies: exact only when `L_PC` is a true global bound.
 
+## Energy and retrieval traces
+
+`settle` and `settle_banks` take `log_diagnostics=True` (default off, so the default output is
+unchanged). They then record, at every step including the start:
+
+* `entropy`: entropy of the softmax weights over memories. `log N` means a global average, near 0
+  means one memory is retrieved.
+* `topk_mass`: softmax mass on the `top_k` memories.
+* `retrieval_distance`: `|z - retrieved(z)|`, which equals the norm of `dE_H/dz`, so it is zero at a
+  fixed point of retrieval.
+
+With banks each trace has one column per bank. Together with the `pc`, `hopfield` and `total`
+energy traces these cover the logging the proposal asks for. They reuse `attention_entropy`,
+`topk_mass` and `retrieval_distance` from `diagnostics.py`. `hopfield_trace` computes the same
+quantities at a single state.
+
 ## Toy study (mechanism check)
 
 `python -m benchmarks.pc_hopfield_toy`, config in `configs/pc_hopfield_toy.yaml`. Linear chain with 6 hidden prototypes, hidden size 16, output size 4, beta 4. `L_PC = 2.433` is exact for this energy. The state starts at the forward-pass value (`E_PC = 0.953`, distance to the clean prototype 3.037).

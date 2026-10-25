@@ -14,6 +14,7 @@ from hopfieldpc import (
     hopfield_energy_grad,
     hopfield_retrieve,
     hopfield_smoothness,
+    hopfield_trace,
     pull_step,
     safe_step_size,
     settle,
@@ -228,3 +229,53 @@ def test_single_full_bank_matches_settle():
     a = settle(mu1, energy, m, beta=2.0, lam=0.5, eta=eta, steps=20)
     b = settle_banks(mu1, energy, [MemoryBank(m, beta=2.0, lam=0.5)], eta=eta, steps=20)
     torch.testing.assert_close(a["z"], b["z"])
+
+
+def test_trace_entropy_and_topk_mass_at_extreme_beta():
+    m, q = _memory(n=10), _query()
+    flat = hopfield_trace(q, m, 1e-6, top_k=3)
+    assert torch.allclose(flat["entropy"], torch.full_like(flat["entropy"], 10.0).log(), atol=1e-3)
+    assert torch.allclose(flat["topk_mass"], torch.full_like(flat["topk_mass"], 0.3), atol=1e-3)
+    sharp = hopfield_trace(q, m, 1000.0, top_k=1)
+    assert torch.all(sharp["topk_mass"] > 0.99)
+    assert torch.all(sharp["entropy"] < 0.05)
+
+
+@pytest.mark.parametrize("beta", BETAS)
+def test_trace_retrieval_distance_is_gradient_norm(beta):
+    q, m = _query(), _memory()
+    torch.testing.assert_close(
+        hopfield_trace(q, m, beta)["retrieval_distance"], hopfield_energy_grad(q, m, beta).norm(dim=-1)
+    )
+
+
+def test_settle_diagnostics_are_opt_in_and_do_not_change_the_result():
+    energy, mu1, l_pc = _linear_pc()
+    kw = {"beta": 2.0, "lam": 0.5, "eta": 1.0 / (l_pc + 0.5), "steps": 12}
+    plain = settle(mu1, energy, _memory(), **kw)
+    logged = settle(mu1, energy, _memory(), log_diagnostics=True, **kw)
+    assert set(plain) == {"z", "pc", "hopfield", "total"}
+    for key in ("entropy", "topk_mass", "retrieval_distance"):
+        assert len(logged[key]) == 13
+        assert logged[key][0].shape == (mu1.shape[0],)
+    torch.testing.assert_close(plain["z"], logged["z"])
+
+
+def test_settle_retrieval_distance_matches_gradient_norm_at_every_step():
+    m, q = _memory(), _query()
+    out = settle(q, lambda z: (0.0 * z).sum(-1), m, beta=3.0, lam=1.0, eta=0.5, steps=5, log_diagnostics=True)
+    assert out["retrieval_distance"][-1].mean() < out["retrieval_distance"][0].mean()
+
+
+def test_settle_banks_diagnostics_have_one_column_per_bank():
+    energy, mu1, _ = _linear_pc()
+    banks = _banks([0.5, 4.0], SPANS)
+    out = settle_banks(mu1, energy, banks, eta=0.05, steps=5, log_diagnostics=True)
+    assert len(out["entropy"]) == 6
+    assert out["entropy"][0].shape == (mu1.shape[0], 2)
+    z = out["z"]
+    for j, b in enumerate(banks):
+        expected = hopfield_trace(z[..., b.start : b.stop], b.memory, b.beta)
+        torch.testing.assert_close(out["entropy"][-1][:, j], expected["entropy"])
+        torch.testing.assert_close(out["retrieval_distance"][-1][:, j], expected["retrieval_distance"])
+    assert set(settle_banks(mu1, energy, banks, eta=0.05, steps=2)) == {"z", "pc", "hopfield", "total"}

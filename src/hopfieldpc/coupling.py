@@ -50,6 +50,7 @@ from dataclasses import dataclass
 import torch
 
 from .api import validate_beta
+from .diagnostics import attention_entropy, retrieval_distance, topk_mass
 from .energy import hopfield_energy
 from .functional import hopfield_retrieve
 
@@ -131,6 +132,25 @@ def estimate_top_curvature(
     return eig
 
 
+def hopfield_trace(
+    z: torch.Tensor, memory: torch.Tensor, beta: float, *, top_k: int = 3
+) -> dict[str, torch.Tensor]:
+    """Per-sample retrieval diagnostics at state z, each of shape [batch].
+
+    entropy: entropy of the softmax weights over memories (log N is uniform, 0 is one memory).
+    topk_mass: softmax mass on the top_k memories.
+    retrieval_distance: |z - retrieved(z)|, which equals the norm of dE_H/dz, so it is zero
+        exactly at a fixed point of retrieval.
+    """
+
+    retrieved, weights = hopfield_retrieve(z, memory, beta=beta, normalize=False)
+    return {
+        "entropy": attention_entropy(weights),
+        "topk_mass": topk_mass(weights, k=top_k),
+        "retrieval_distance": retrieval_distance(retrieved, z),
+    }
+
+
 def joint_energy(
     pc_energy: torch.Tensor,
     z: torch.Tensor,
@@ -165,6 +185,8 @@ def settle(
     lam: float,
     eta: float,
     steps: int,
+    log_diagnostics: bool = False,
+    top_k: int = 3,
 ) -> dict[str, object]:
     """Run joint PC + Hopfield inference on the hidden state z.
 
@@ -174,22 +196,31 @@ def settle(
             gradient comes from autograd, so any differentiable energy works.
         memory: Hopfield memory [N, dim].
         beta, lam, eta, steps: coupling and step settings.
+        log_diagnostics: also record "entropy", "topk_mass" and "retrieval_distance"
+            (see hopfield_trace) at every step.
+        top_k: k for the top-k attention mass.
 
     Returns:
         dict with the final state "z" and per-step traces "pc", "hopfield" and
-        "total" (lists of [batch] tensors with steps + 1 entries).
+        "total" (lists of [batch] tensors with steps + 1 entries), plus the
+        diagnostic traces when log_diagnostics is True.
     """
 
     z = z0.detach().clone()
     traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
+    if log_diagnostics:
+        traces.update({"entropy": [], "topk_mass": [], "retrieval_distance": []})
 
     def record(state: torch.Tensor) -> None:
         with torch.no_grad():
             e_pc = pc_energy_fn(state)
             e_h = hopfield_energy(state, memory, beta, include_constants=True)
+            diag = hopfield_trace(state, memory, beta, top_k=top_k) if log_diagnostics else {}
         traces["pc"].append(e_pc)
         traces["hopfield"].append(e_h)
         traces["total"].append(e_pc + lam * e_h)
+        for key, value in diag.items():
+            traces[key].append(value)
 
     record(z)
     for _ in range(steps):
@@ -258,19 +289,34 @@ def settle_banks(
     *,
     eta: float,
     steps: int,
+    log_diagnostics: bool = False,
+    top_k: int = 3,
 ) -> dict[str, object]:
-    """Joint PC + several-bank Hopfield inference. Same outputs as settle."""
+    """Joint PC + several-bank Hopfield inference. Same outputs as settle.
+
+    With log_diagnostics the diagnostic traces have shape [batch, num_banks] per step,
+    one column per bank, computed on that bank's slice of the state.
+    """
 
     z = z0.detach().clone()
     traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
+    if log_diagnostics:
+        traces.update({"entropy": [], "topk_mass": [], "retrieval_distance": []})
 
     def record(state: torch.Tensor) -> None:
         with torch.no_grad():
             e_pc = pc_energy_fn(state)
             e_h = banks_energy(state, banks)
+            per_bank = [
+                hopfield_trace(state[..., b.start : b.stop], b.memory, b.beta, top_k=top_k)
+                for b in banks
+            ] if log_diagnostics else []
         traces["pc"].append(e_pc)
         traces["hopfield"].append(e_h)
         traces["total"].append(e_pc + e_h)
+        if log_diagnostics:
+            for key in ("entropy", "topk_mass", "retrieval_distance"):
+                traces[key].append(torch.stack([d[key] for d in per_bank], dim=-1))
 
     record(z)
     for _ in range(steps):
