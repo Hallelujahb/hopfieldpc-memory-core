@@ -44,7 +44,8 @@ Assumes a fixed memory and float32 or float64 inputs.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import torch
 
@@ -195,6 +196,87 @@ def settle(
         x = z.detach().requires_grad_(True)
         (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x)
         z = pull_step(z, grad, memory, beta, lam, eta).detach()
+        record(z)
+
+    return {"z": z, **traces}
+
+
+@dataclass(frozen=True)
+class MemoryBank:
+    """A Hopfield memory acting on state[..., start:stop] with weight lam."""
+
+    memory: torch.Tensor
+    beta: float
+    lam: float
+    start: int = 0
+    stop: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.lam < 0:
+            raise ValueError(f"lam must be >= 0, got {self.lam!r}.")
+
+
+def effective_lam(banks: Sequence[MemoryBank], dim: int) -> float:
+    """Upper curvature the banks add to the joint energy.
+
+    Each bank adds lam_b * H_b with H_b <= I on its slice, so the Hopfield part is bounded by
+    the diagonal matrix whose entry i is the sum of lam_b over banks covering coordinate i.
+    Its largest eigenvalue is returned: max over coordinates of that sum. Banks on disjoint
+    slices (different layers) give max lam_b, banks on the same slice give the sum.
+    """
+
+    cover = torch.zeros(dim, dtype=torch.float64)
+    for bank in banks:
+        cover[bank.start : bank.stop] += bank.lam
+    return float(cover.max())
+
+
+def banks_energy(z: torch.Tensor, banks: Sequence[MemoryBank]) -> torch.Tensor:
+    """Sum of lam_b * E_H(z[..., slice_b]; M_b, beta_b), per sample [batch]."""
+
+    total = torch.zeros(z.shape[0], dtype=z.dtype, device=z.device)
+    for bank in banks:
+        part = z[..., bank.start : bank.stop]
+        total = total + bank.lam * hopfield_energy(part, bank.memory, bank.beta, include_constants=True)
+    return total
+
+
+def banks_grad(z: torch.Tensor, banks: Sequence[MemoryBank]) -> torch.Tensor:
+    """Gradient of banks_energy: lam_b * (z_slice - retrieved(z_slice)) on each slice."""
+
+    grad = torch.zeros_like(z)
+    for bank in banks:
+        part = z[..., bank.start : bank.stop]
+        grad[..., bank.start : bank.stop] += bank.lam * hopfield_energy_grad(part, bank.memory, bank.beta)
+    return grad
+
+
+def settle_banks(
+    z0: torch.Tensor,
+    pc_energy_fn: Callable[[torch.Tensor], torch.Tensor],
+    banks: Sequence[MemoryBank],
+    *,
+    eta: float,
+    steps: int,
+) -> dict[str, object]:
+    """Joint PC + several-bank Hopfield inference. Same outputs as settle."""
+
+    z = z0.detach().clone()
+    traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
+
+    def record(state: torch.Tensor) -> None:
+        with torch.no_grad():
+            e_pc = pc_energy_fn(state)
+            e_h = banks_energy(state, banks)
+        traces["pc"].append(e_pc)
+        traces["hopfield"].append(e_h)
+        traces["total"].append(e_pc + e_h)
+
+    record(z)
+    for _ in range(steps):
+        x = z.detach().requires_grad_(True)
+        (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x)
+        z = (z - eta * (grad + banks_grad(z, banks))).detach()
         record(z)
 
     return {"z": z, **traces}

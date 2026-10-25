@@ -49,10 +49,21 @@ sufficient for descent, not tight in general.
 
 Assumptions: fixed memory, unnormalized retrieval, and full-batch gradient steps on `z`.
 
+## Several memory banks
+
+A `MemoryBank` is a memory acting on a slice of the state with its own `beta` and `lam_b`. This follows the
+layer-local memory idea of the proposal: one bank per layer instead of one memory that mixes incompatible
+patterns. The Hopfield part of the Hessian is `sum_b lam_b H_b`, and each `H_b` is bounded by the identity on
+its slice. So the Hopfield part is bounded by a diagonal matrix whose entry `i` is the sum of `lam_b` over
+the banks that cover coordinate `i`, and its largest eigenvalue is
+
+Banks on different layers (disjoint slices) give `max_b lam_b`. Banks on the same slice give the sum.
+Using the sum over all banks is also safe, but wastes step size when banks sit on different layers.
+The same scope caveat applies: exact only when `L_PC` is a true global bound.
+
 ## Limitations and open questions
 
 * The tests use a quadratic `E_PC` (a linear chain). A nonlinear PC energy needs local curvature estimates.
 * The memory is fixed. A learnable or refreshed memory changes the energy during training.
-* Inference is full-batch. Per-layer memory banks (a joint energy over several layers) are the next
-  step and need their own curvature bound.
+* Inference is full-batch. Banks act on slices of one joint state vector. A per-layer step size (preconditioning) could allow larger steps and is not done here.
 * Related work (predictive-coding associative memories, Hopfield variants) still has to be compared against before claiming anything beyond the engineering of the coupling and the step-size rule.

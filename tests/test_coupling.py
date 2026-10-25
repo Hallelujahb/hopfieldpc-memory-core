@@ -4,6 +4,10 @@ import pytest
 import torch
 
 from hopfieldpc import (
+    MemoryBank,
+    banks_energy,
+    banks_grad,
+    effective_lam,
     estimate_top_curvature,
     hopfield_curvature_bounds,
     hopfield_energy,
@@ -13,6 +17,7 @@ from hopfieldpc import (
     pull_step,
     safe_step_size,
     settle,
+    settle_banks,
 )
 
 DT = torch.float64
@@ -158,3 +163,68 @@ def test_pull_step_shape_and_argument_validation():
         safe_step_size(1.0, -0.1)
     with pytest.raises(ValueError):
         safe_step_size(0.0, 0.1)
+
+
+SPANS = [(0, 8), (8, 16)]
+CONFIGS = [
+    ([0.5, 4.0], SPANS),
+    ([2.0, 2.0], SPANS),
+    ([0.5, 4.0], [(0, 8), (0, 8)]),
+    ([1.0, 2.0], [(0, 8), (4, 12)]),
+]
+
+
+def _banks(lams, spans, beta=2.0):
+    return [
+        MemoryBank(_memory(n=6, d=b - a, seed=10 + i), beta=beta, lam=lam, start=a, stop=b)
+        for i, (lam, (a, b)) in enumerate(zip(lams, spans))
+    ]
+
+
+def test_effective_lam_max_for_disjoint_sum_for_same_slice():
+    assert effective_lam(_banks([0.5, 4.0], SPANS), 16) == pytest.approx(4.0)
+    assert effective_lam(_banks([0.5, 4.0], [(0, 8), (0, 8)]), 16) == pytest.approx(4.5)
+    assert effective_lam(_banks([1.0, 2.0], [(0, 8), (4, 12)]), 16) == pytest.approx(3.0)
+
+
+def test_bank_negative_lam_rejected():
+    with pytest.raises(ValueError):
+        MemoryBank(_memory(n=6, d=8), beta=2.0, lam=-1.0)
+
+
+def test_banks_grad_matches_autograd():
+    banks = _banks([0.5, 4.0], [(0, 8), (4, 12)])
+    z = _query(b=3, d=16)
+    x = z.clone().requires_grad_(True)
+    banks_energy(x, banks).sum().backward()
+    torch.testing.assert_close(x.grad, banks_grad(z, banks))
+
+
+@pytest.mark.parametrize("lams,spans", CONFIGS)
+def test_bank_hessian_upper_bound(lams, spans):
+    banks = _banks(lams, spans)
+    bound = effective_lam(banks, 16)
+    for seed in range(5):
+        z = _query(b=1, d=16, seed=seed)
+        h = torch.autograd.functional.hessian(lambda x: banks_energy(x, banks).sum(), z).reshape(16, 16)
+        assert float(torch.linalg.eigvalsh(h).max()) <= bound + 1e-9
+
+
+@pytest.mark.parametrize("lams,spans", CONFIGS)
+def test_banks_monotone_below_sharp_limit(lams, spans):
+    energy, mu1, l_pc = _linear_pc()
+    banks = _banks(lams, spans)
+    eta = 0.95 * safe_step_size(l_pc, effective_lam(banks, 16), conservative=False)
+    out = settle_banks(mu1, energy, banks, eta=eta, steps=80)
+    total = torch.stack(out["total"])
+    assert torch.all(total[1:] <= total[:-1] + 1e-9)
+    assert torch.all(total[-1] < total[0])
+
+
+def test_single_full_bank_matches_settle():
+    energy, mu1, l_pc = _linear_pc()
+    m = _memory()
+    eta = 1.0 / (l_pc + 0.5)
+    a = settle(mu1, energy, m, beta=2.0, lam=0.5, eta=eta, steps=20)
+    b = settle_banks(mu1, energy, [MemoryBank(m, beta=2.0, lam=0.5)], eta=eta, steps=20)
+    torch.testing.assert_close(a["z"], b["z"])

@@ -6,6 +6,10 @@ before FabricPC integration.
 
 from .api import HopfieldMemoryOutput, HopfieldShapeContract, HopfieldShapeError
 from .coupling import (
+    MemoryBank,
+    banks_energy,
+    banks_grad,
+    effective_lam,
     estimate_top_curvature,
     hopfield_curvature_bounds,
     hopfield_energy_grad,
@@ -14,6 +18,7 @@ from .coupling import (
     pull_step,
     safe_step_size,
     settle,
+    settle_banks,
 )
 from .diagnostics import (
     argmax_memory_index,
@@ -34,9 +39,13 @@ __all__ = [
     "HopfieldMemoryOutput",
     "HopfieldShapeContract",
     "HopfieldShapeError",
+    "MemoryBank",
     "argmax_memory_index",
     "attention_entropy",
+    "banks_energy",
+    "banks_grad",
     "build_retrieval_diagnostics",
+    "effective_lam",
     "estimate_top_curvature",
     "hopfield_curvature_bounds",
     "hopfield_energy",
@@ -51,6 +60,7 @@ __all__ = [
     "safe_step_size",
     "selected_memory_distance",
     "settle",
+    "settle_banks",
     "topk_mass",
     "topk_recall",
 ]
