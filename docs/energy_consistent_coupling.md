@@ -61,6 +61,38 @@ Banks on different layers (disjoint slices) give `max_b lam_b`. Banks on the sam
 Using the sum over all banks is also safe, but wastes step size when banks sit on different layers.
 The same scope caveat applies: exact only when `L_PC` is a true global bound.
 
+## Toy study (mechanism check)
+
+`python -m benchmarks.pc_hopfield_toy`, config in `configs/pc_hopfield_toy.yaml`. Linear chain with 6 hidden prototypes, hidden size 16, output size 4, beta 4. `L_PC = 2.433` is exact for this energy. The state starts at the forward-pass value (`E_PC = 0.953`, distance to the clean prototype 3.037).
+
+| lam | safe eta | final E_PC | mean distance to clean prototype | nearest-memory acc |
+|---|---|---|---|---|
+| 0 | 0.411 | 0.463 | 2.812 | 1.000 |
+| 0.05 | 0.403 | 0.472 | 2.682 | 1.000 |
+| 0.1 | 0.395 | 0.497 | 2.564 | 1.000 |
+| 0.3 | 0.366 | 0.684 | 2.181 | 1.000 |
+| 1 | 0.291 | 1.515 | 1.437 | 1.000 |
+| 3 | 0.184 | 2.883 | 0.733 | 1.000 |
+
+Step-size rule, `eta = fraction * 2 / (L_PC + lam)`:
+
+| lam | fraction | energy monotone |
+|---|---|---|
+| 0.3 | 0.5 | True |
+| 0.3 | 0.95 | True |
+| 0.3 | 1.05 | False |
+| 0.3 | 1.5 | False |
+| 1 | 0.5 | True |
+| 1 | 0.95 | True |
+| 1 | 1.05 | False |
+| 1 | 1.5 | False |
+| 3 | 0.5 | True |
+| 3 | 0.95 | True |
+| 3 | 1.05 | False |
+| 3 | 1.5 | False |
+
+The pull moves the state toward the prototype and costs PC energy, as the theory says. Nearest-memory accuracy is already 1.000 at lam = 0, so this toy shows no downstream benefit. It checks the mechanism and the step-size rule only.
+
 ## Limitations and open questions
 
 * The tests use a quadratic `E_PC` (a linear chain). A nonlinear PC energy needs local curvature estimates.
