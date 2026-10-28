@@ -16,9 +16,10 @@ so the latent update becomes
 lam = 0 is plain PC. With no PC term and eta * lam = 1 the update is exactly
 one-step Hopfield retrieval.
 
-E_H must be the full energy, hopfield_energy(..., include_constants=True). The default
-hopfield_energy leaves out the q-dependent term 1/2 |q|^2 and is not the energy that
-retrieval descends.
+E_H is hopfield_energy(..., include_constants=True), the full form of the modern Hopfield
+energy. hopfield_energy always carries the q-dependent term 1/2 |q|^2, so its gradient is
+q - retrieved(q). The two constants only shift the value, never the gradient, so they do not
+change the dynamics.
 
 Stability
 ---------
@@ -110,26 +111,35 @@ def estimate_top_curvature(
     iters: int = 30,
     seed: int = 0,
 ) -> float:
-    """Largest Hessian eigenvalue of E_PC at z, by power iteration on Hessian-vector products.
+    """Largest signed Hessian eigenvalue of E_PC at z, by power iteration on Hessian-vector products.
 
-    Works for any differentiable energy. The estimate is local: repeat it if z moves
-    a lot. Batch samples are independent, so the result is a maximum over samples.
+    Plain power iteration finds the eigenvalue of largest magnitude, which is negative when
+    the energy has a strong negative direction. A first pass estimates that magnitude s, then
+    a second pass runs on H + sI (positive semidefinite) and s is subtracted, so the result is
+    the top eigenvalue with its sign. Works for any differentiable energy. The estimate is
+    local: repeat it if z moves a lot. Batch samples are independent, so the result is a
+    maximum over samples.
     """
 
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(z.shape, generator=g, dtype=z.dtype)
-    v = v / v.norm()
+    g = torch.Generator(device=z.device).manual_seed(seed)
     x = z.detach().clone().requires_grad_(True)
     (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x, create_graph=True)
-    eig = 0.0
-    for _ in range(iters):
-        (hv,) = torch.autograd.grad(grad, x, grad_outputs=v, retain_graph=True)
-        eig = float((hv * v).sum())
-        norm = hv.norm()
-        if norm == 0:
-            return 0.0
-        v = hv / norm
-    return eig
+
+    def top(shift: float) -> float:
+        v = torch.randn(z.shape, generator=g, dtype=z.dtype, device=z.device)
+        v = v / v.norm()
+        eig = 0.0
+        for _ in range(iters):
+            (hv,) = torch.autograd.grad(grad, x, grad_outputs=v, retain_graph=True)
+            hv = hv + shift * v
+            eig = float((hv * v).sum())
+            norm = hv.norm()
+            if norm == 0:
+                return -shift
+            v = hv / norm
+        return eig - shift
+
+    return top(abs(top(0.0)))
 
 
 def hopfield_trace(
@@ -176,6 +186,49 @@ def pull_step(
     return z - eta * (pc_grad + lam * hopfield_energy_grad(z, memory, beta))
 
 
+def _descend(
+    z0: torch.Tensor,
+    pc_energy_fn: Callable[[torch.Tensor], torch.Tensor],
+    hopfield_part: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+    hopfield_grad: Callable[[torch.Tensor], torch.Tensor],
+    trace_fn: Callable[[torch.Tensor], dict[str, torch.Tensor]],
+    *,
+    eta: float,
+    steps: int,
+    log_diagnostics: bool,
+) -> dict[str, object]:
+    """Shared gradient-descent loop behind settle and settle_banks.
+
+    hopfield_part(z) returns (value to log as "hopfield", value added into "total").
+    hopfield_grad(z) is the full Hopfield gradient, already weighted by lam.
+    """
+
+    z = z0.detach().clone()
+    traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
+    if log_diagnostics:
+        traces.update({"entropy": [], "topk_mass": [], "retrieval_distance": []})
+
+    def record(state: torch.Tensor) -> None:
+        with torch.no_grad():
+            e_pc = pc_energy_fn(state)
+            logged, contribution = hopfield_part(state)
+            diag = trace_fn(state) if log_diagnostics else {}
+        traces["pc"].append(e_pc)
+        traces["hopfield"].append(logged)
+        traces["total"].append(e_pc + contribution)
+        for key, value in diag.items():
+            traces[key].append(value)
+
+    record(z)
+    for _ in range(steps):
+        x = z.detach().requires_grad_(True)
+        (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x)
+        z = (z - eta * (grad + hopfield_grad(z))).detach()
+        record(z)
+
+    return {"z": z, **traces}
+
+
 def settle(
     z0: torch.Tensor,
     pc_energy_fn: Callable[[torch.Tensor], torch.Tensor],
@@ -206,30 +259,20 @@ def settle(
         diagnostic traces when log_diagnostics is True.
     """
 
-    z = z0.detach().clone()
-    traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
-    if log_diagnostics:
-        traces.update({"entropy": [], "topk_mass": [], "retrieval_distance": []})
+    def hopfield_part(state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        e_h = hopfield_energy(state, memory, beta, include_constants=True)
+        return e_h, lam * e_h
 
-    def record(state: torch.Tensor) -> None:
-        with torch.no_grad():
-            e_pc = pc_energy_fn(state)
-            e_h = hopfield_energy(state, memory, beta, include_constants=True)
-            diag = hopfield_trace(state, memory, beta, top_k=top_k) if log_diagnostics else {}
-        traces["pc"].append(e_pc)
-        traces["hopfield"].append(e_h)
-        traces["total"].append(e_pc + lam * e_h)
-        for key, value in diag.items():
-            traces[key].append(value)
-
-    record(z)
-    for _ in range(steps):
-        x = z.detach().requires_grad_(True)
-        (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x)
-        z = pull_step(z, grad, memory, beta, lam, eta).detach()
-        record(z)
-
-    return {"z": z, **traces}
+    return _descend(
+        z0,
+        pc_energy_fn,
+        hopfield_part,
+        lambda s: lam * hopfield_energy_grad(s, memory, beta),
+        lambda s: hopfield_trace(s, memory, beta, top_k=top_k),
+        eta=eta,
+        steps=steps,
+        log_diagnostics=log_diagnostics,
+    )
 
 
 @dataclass(frozen=True)
@@ -245,6 +288,23 @@ class MemoryBank:
     def __post_init__(self) -> None:
         if self.lam < 0:
             raise ValueError(f"lam must be >= 0, got {self.lam!r}.")
+        validate_beta(self.beta)
+        if self.memory.ndim != 2:
+            raise ValueError(
+                f"bank memory must be [num_memories, dim], got {tuple(self.memory.shape)}."
+            )
+        if self.start < 0:
+            raise ValueError(f"start must be >= 0, got {self.start!r}.")
+        if self.stop is not None:
+            if self.stop <= self.start:
+                raise ValueError(
+                    f"stop must be greater than start, got start={self.start}, stop={self.stop}."
+                )
+            if self.stop - self.start != self.memory.shape[1]:
+                raise ValueError(
+                    f"bank slice [{self.start}:{self.stop}] has width {self.stop - self.start}, "
+                    f"but the memory dim is {self.memory.shape[1]}."
+                )
 
 
 def effective_lam(banks: Sequence[MemoryBank], dim: int) -> float:
@@ -298,31 +358,27 @@ def settle_banks(
     one column per bank, computed on that bank's slice of the state.
     """
 
-    z = z0.detach().clone()
-    traces: dict[str, list[torch.Tensor]] = {"pc": [], "hopfield": [], "total": []}
-    if log_diagnostics:
-        traces.update({"entropy": [], "topk_mass": [], "retrieval_distance": []})
+    def hopfield_part(state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        e_h = banks_energy(state, banks)
+        return e_h, e_h
 
-    def record(state: torch.Tensor) -> None:
-        with torch.no_grad():
-            e_pc = pc_energy_fn(state)
-            e_h = banks_energy(state, banks)
-            per_bank = [
-                hopfield_trace(state[..., b.start : b.stop], b.memory, b.beta, top_k=top_k)
-                for b in banks
-            ] if log_diagnostics else []
-        traces["pc"].append(e_pc)
-        traces["hopfield"].append(e_h)
-        traces["total"].append(e_pc + e_h)
-        if log_diagnostics:
-            for key in ("entropy", "topk_mass", "retrieval_distance"):
-                traces[key].append(torch.stack([d[key] for d in per_bank], dim=-1))
+    def trace(state: torch.Tensor) -> dict[str, torch.Tensor]:
+        per_bank = [
+            hopfield_trace(state[..., b.start : b.stop], b.memory, b.beta, top_k=top_k)
+            for b in banks
+        ]
+        return {
+            key: torch.stack([d[key] for d in per_bank], dim=-1)
+            for key in ("entropy", "topk_mass", "retrieval_distance")
+        }
 
-    record(z)
-    for _ in range(steps):
-        x = z.detach().requires_grad_(True)
-        (grad,) = torch.autograd.grad(pc_energy_fn(x).sum(), x)
-        z = (z - eta * (grad + banks_grad(z, banks))).detach()
-        record(z)
-
-    return {"z": z, **traces}
+    return _descend(
+        z0,
+        pc_energy_fn,
+        hopfield_part,
+        lambda s: banks_grad(s, banks),
+        trace,
+        eta=eta,
+        steps=steps,
+        log_diagnostics=log_diagnostics,
+    )

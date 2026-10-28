@@ -279,3 +279,25 @@ def test_settle_banks_diagnostics_have_one_column_per_bank():
         torch.testing.assert_close(out["entropy"][-1][:, j], expected["entropy"])
         torch.testing.assert_close(out["retrieval_distance"][-1][:, j], expected["retrieval_distance"])
     assert set(settle_banks(mu1, energy, banks, eta=0.05, steps=2)) == {"z", "pc", "hopfield", "total"}
+
+
+def test_estimate_top_curvature_returns_signed_top_with_negative_curvature():
+    d = torch.tensor([-5.0, 1.0], dtype=DT)
+
+    def energy(z):
+        return 0.5 * (d * z**2).sum(-1)
+
+    z = torch.ones(3, 2, dtype=DT)
+    assert estimate_top_curvature(energy, z, iters=200) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_bank_slice_width_must_match_memory_dim():
+    with pytest.raises(ValueError, match="width"):
+        MemoryBank(_memory(n=6, d=8), beta=2.0, lam=1.0, start=0, stop=12)
+
+
+def test_bank_rejects_bad_beta_and_empty_slice():
+    with pytest.raises(ValueError, match="beta"):
+        MemoryBank(_memory(n=6, d=8), beta=0.0, lam=1.0)
+    with pytest.raises(ValueError, match="stop"):
+        MemoryBank(_memory(n=6, d=8), beta=2.0, lam=1.0, start=8, stop=8)

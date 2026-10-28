@@ -19,13 +19,15 @@ z <- z - eta * ( dE_PC/dz + lam * (z - retrieved(z)) )
   `(1 - eta*lam)` on the old state and retrieval weight `eta*lam`. So A is B with the decay term
   dropped, and B is the version with a descent guarantee.
 
-## The energy has to be the full one
+## Which energy
 
-`hopfield_energy` with the default `include_constants=False` leaves out `1/2 |q|^2`. That term depends
-on q, so it is not a constant, and the default value is not the energy that retrieval descends. On the
-2-D example with memories (1,0), (0,1), (-1,0), beta 5 and query (0.8, 0.5), the default value rises
-after the first retrieval step (-0.8403 to -0.8253), while the full energy falls (0.3244 to 0.2448).
-This module always uses the full energy, `hopfield_energy(..., include_constants=True)`.
+The Hopfield term is `hopfield_energy(..., include_constants=True)`. `hopfield_energy` carries the query
+term `1/2 |q|^2` in every mode, so its gradient is `q - retrieved(q)` and one unnormalized retrieval step is
+a unit gradient step. The two constants, `(1/beta) log N` and `1/2 max |m_i|^2`, shift the value and not the
+gradient, so they never change the dynamics. They are included here so the logged values match the full
+modern Hopfield energy. On the 2-D example with memories (1,0), (0,1), (-1,0), beta 5 and query (0.8, 0.5),
+the default value falls from -0.3953 to -0.4749 after the first retrieval step and the value with constants
+falls from 0.3244 to 0.2448.
 
 ## Stability rule
 
@@ -41,7 +43,8 @@ eta < 2 / (L_PC + lam)          (eta <= 1 / (L_PC + lam) is the conservative cho
 `L_PC` is the largest Hessian eigenvalue of `E_PC`. `beta` and the memory norm do not enter the step-size
 limit. They set the negative curvature, which is how deep and separated the valleys are (research
 question 6 of the proposal). `estimate_top_curvature` estimates `L_PC` for any differentiable energy
-with Hessian-vector products. The estimate is local, so repeat it if `z` moves a lot.
+with Hessian-vector products. It returns the largest signed eigenvalue (a shifted power iteration), so a
+strong negative direction does not hide the top one. The estimate is local, so repeat it if `z` moves a lot.
 
 Scope: the rule is exact when `L_PC` is a true global bound on the PC Hessian, as in the linear chain
 used in the tests. For a nonlinear PC network `L_PC` is local and the rule is a heuristic. It is
@@ -56,6 +59,10 @@ layer-local memory idea of the proposal: one bank per layer instead of one memor
 patterns. The Hopfield part of the Hessian is `sum_b lam_b H_b`, and each `H_b` is bounded by the identity on
 its slice. So the Hopfield part is bounded by a diagonal matrix whose entry `i` is the sum of `lam_b` over
 the banks that cover coordinate `i`, and its largest eigenvalue is
+
+```
+max_i  sum over banks b that cover i of  lam_b
+```
 
 Banks on different layers (disjoint slices) give `max_b lam_b`. Banks on the same slice give the sum.
 Using the sum over all banks is also safe, but wastes step size when banks sit on different layers.
