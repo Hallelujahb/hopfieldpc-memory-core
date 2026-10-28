@@ -102,7 +102,7 @@ def evaluate_retrieval(
 def compute_capacity_summary(
     results: list[dict[str, Any]], threshold: float = 0.95
 ) -> list[dict[str, Any]]:
-    """Compute largest memory_size where top1_acc >= threshold for each (beta, noise, num_updates)."""
+    """Largest memory_size where top1_acc >= threshold at that size and every smaller tested size, per (beta, noise, num_updates)."""
     groups: dict[tuple[float, float, int], list[dict[str, Any]]] = {}
     for r in results:
         key = (r["beta"], r["noise"], r["num_updates"])
@@ -110,13 +110,18 @@ def compute_capacity_summary(
 
     summary = []
     for (beta, noise, num_updates), group in groups.items():
-        qualifying = [r["memory_size"] for r in group if r["top1_acc"] >= threshold]
-        capacity = max(qualifying) if qualifying else 0
+        # Capacity is the largest size such that every tested size up to it
+        # passes; sizes above the first failure do not count.
+        capacity = 0
+        for r in sorted(group, key=lambda r: r["memory_size"]):
+            if r["top1_acc"] < threshold:
+                break
+            capacity = r["memory_size"]
         summary.append({
             "beta": beta,
             "noise": noise,
             "num_updates": num_updates,
-            f"capacity_at_{int(threshold*100)}": capacity,
+            f"capacity_at_{round(threshold * 100)}": capacity,
         })
     return summary
 
@@ -145,7 +150,7 @@ def print_results_table(results: list[dict[str, Any]]) -> None:
 
 def print_capacity_table(summary: list[dict[str, Any]], threshold: float = 0.95) -> None:
     """Print capacity summary table."""
-    cap_key = f"capacity_at_{int(threshold*100)}"
+    cap_key = f"capacity_at_{round(threshold * 100)}"
     header = f"{'beta':>7} | {'noise':>7} | {'updates':>7} | {cap_key:>15}"
     separator = "-" * len(header)
 
@@ -274,7 +279,7 @@ def main() -> None:
     print_results_table(results)
 
     threshold = config.get("capacity_threshold", 0.95)
-    print(f"\n--- Capacity @ {int(threshold * 100)}% Accuracy Summary ---")
+    print(f"\n--- Capacity @ {round(threshold * 100)}% Accuracy Summary ---")
     print_capacity_table(capacity_summary, threshold=threshold)
     print(f"\nReports saved successfully to {output_dir}")
 
