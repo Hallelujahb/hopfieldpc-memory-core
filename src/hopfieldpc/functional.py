@@ -61,6 +61,10 @@ def hopfield_retrieve(
         normalize:
             If True, query and memory are L2-normalized for similarity scoring.
             The retrieved vector is still computed from the original memory.
+            Warning: with normalize=True the update q -> retrieved(q) is not a
+            gradient step of hopfield_energy and may increase it. The field
+            q - retrieved(q) then has an asymmetric Jacobian, so no energy exists
+            for it. Use normalize=False wherever an energy is assumed.
 
     Returns:
         retrieved:

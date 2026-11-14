@@ -25,6 +25,10 @@ def hopfield_energy(
 ) -> torch.Tensor:
     """Compute the state-dependent Hopfield energy and optional offsets.
 
+    Note: the gradient identity grad E = q - retrieved(q) and energy descent
+    hold only for unnormalized retrieval (normalize=False). Cosine-normalized
+    retrieval is not a gradient field, so no energy corresponds to it.
+
     Both modes include the quadratic query term. For fixed memory, fixed
     positive beta, and unnormalized auto-associative retrieval, each query's
     energy gradient is q - retrieved(q). The retrieval update does not increase
